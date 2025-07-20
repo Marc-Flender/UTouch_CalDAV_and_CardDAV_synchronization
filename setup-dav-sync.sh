@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+script_repository=$HOME/bin # for cron tasks and manuals sync scripts
 
 function generate_padding {
     # get the first character ':0:1' - aka index zero to one
@@ -53,15 +54,17 @@ function cron_handler {
                     sudo sed --in-place --expression="s|$regex_search|$cron_entry|" "$cron_tab"
                 else
                     echo "cron - creating new entry for '$server_config_name'"
-                    echo "$cron_entry" | sudo tee  --append "$cron_tab" &>/dev/null
-                fi
+#                    echo "$cron_entry" | sudo tee  --append "$cron_tab" &>/dev/null
+                 (crontab -u $USER -l; echo "$cron_entry" ) | crontab -u $USER -
+                 fi
             else
                 echo "User's cron tab not found, creating it."
-                sudo touch "$cron_tab"
-                sudo chown $USER:clickpkg "$cron_tab" # non portable operation
-                sudo chmod 600 "$cron_tab"
+#                sudo touch "$cron_tab"
+#                sudo chown $USER:clickpkg "$cron_tab" # non portable operation
+#                sudo chmod 600 "$cron_tab"
 
-                echo "$cron_entry" | sudo tee  --append "$cron_tab" &>/dev/null
+ #               echo "$cron_entry" | sudo tee  --append "$cron_tab" &>/dev/null
+                 (crontab -u $USER -l; echo "$cron_entry" ) | crontab -u $USER -
             fi
         ;;
         'delete')
@@ -80,7 +83,6 @@ function cron_handler {
             fi
         ;;
         *)
-            sudo mount / -o remount,ro
             echo 'Internal error!' >&2
             echo "in the '${FUNCNAME[0]}' function" >&2
             exit 1
@@ -95,13 +97,14 @@ function cron_handler {
 
 function manual_sync {
     local action="$1" # either 'add' or 'delete'
-    local name="$2"
+    local script_name="$2"
     local sync="$3" # only needed for the 'add' action
 
-    local script_name="$HOME/bin/manual-sync-$name.sh"
 
     case "$action" in
         'add')
+		    echo "the manual_sync program content is"
+		    echo "$sync"
             echo "$sync" > $script_name
             chown $USER:$USER $script_name
             chmod 775 $script_name
@@ -139,16 +142,24 @@ function setup_sync {
     local name="$2"
 
     local sync="export DISPLAY=:0.0 && export DBUS_SESSION_BUS_ADDRESS=\$(ps -u $USER e | grep -Eo 'dbus-daemon.*address=unix:abstract=/tmp/dbus-[A-Za-z0-9]{10}' | tail -c35) && /usr/bin/syncevolution $server_config_name"
-    local cron_entry="$CRON_FREQUENCY $sync"
+    local script_name="$script_repository/manual-sync-$name.sh"
+    local cron_entry="$CRON_FREQUENCY $script_name"
     local action='add'
 
-    cron_handler "$action" "$server_config_name" "$cron_entry"
+	if $resync; then
+		echo "$sync" 
+		eval $sync
+	else
 
-    if [ ! -d $HOME/bin ]; then
-        mkdir $HOME/bin
+        cron_handler "$action" "$server_config_name" "$cron_entry"
+    
+        if [ ! -d $script_repository ]; then
+		    echo "creating $script_repository"
+            mkdir $script_repository
+        fi
+    
+        manual_sync "$action" "$script_name" "$sync"
     fi
-
-    manual_sync "$action" "$name" "$sync"
 }
 
 function delete {
@@ -158,27 +169,30 @@ function delete {
     local visual_name="$4"
 
     local action='delete'
+    local script_name="$script_repository/manual-sync-$name.sh"
     cron_handler "$action" "$server_config_name"
-    manual_sync "$action" "$name"
+    manual_sync "$action" "$script_name"
     
-    case "$type_action" in
-        'contact')
-            backend="evolution-contacts"
-        ;;
-        'calendar')
-            backend="evolution-calendar"
-        ;;
-    esac
+	if ! $cron_only; then
+         case "$type_action" in
+            'contact')
+                backend="evolution-contacts"
+            ;;
+            'calendar')
+                backend="evolution-calendar"
+            ;;
+        esac
 
 
-    syncevolution --remove-database backend=$backend \
-        database="${visual_name:0:30}" &>/dev/null
-    syncevolution --remove "target-config@${server_config_name:0:30}"
-    syncevolution --remove "@${server_config_name:0:30}"
-    syncevolution --remove "${server_config_name:0:30}"
-    # I cannot find the `syncevolution` command to remove this configuration
-    rm --recursive --force \
-        $HOME/.config/syncevolution/default/sources/${name:0:30}
+        syncevolution --remove-database backend=$backend \
+            database="${visual_name:0:30}" &>/dev/null
+        syncevolution --remove "target-config@${server_config_name:0:30}"
+        syncevolution --remove "@${server_config_name:0:30}"
+        syncevolution --remove "${server_config_name:0:30}"
+        # I cannot find the `syncevolution` command to remove this configuration
+        rm --recursive --force \
+            $HOME/.config/syncevolution/default/sources/${name:0:30}
+    fi
 }
 
 function delete-contacts {
@@ -212,43 +226,45 @@ function contacts {
         setup_sync "$contacts_server_config_names"  \
                    "$contacts_names"
 
-        #Create contact list
-        syncevolution --create-database backend=evolution-contacts \
-                                        database="$contacts_visual_names"
-
-        #Create Peer
-        #if (( ${#USERNAME} != 0 )) || (( ${#PASSWORD} != 0 )); then
-        if (( ${#PASSWORD} != 0 )); then
-            syncevolution --configure --template webdav username="$USERNAME" \
-                password="$PASSWORD" syncURL="$url" \
-                keyring=no "target-config@$contacts_server_config_names"
-        else
-            syncevolution --configure --template webdav syncURL="$url" \
-                keyring=no "target-config@$contacts_server_config_names"
+ 		if [[! $cron_only]  && [! $resync]]; then   #need for creating databases
+            #Create contact list
+            syncevolution --create-database backend=evolution-contacts \
+                                            database="$contacts_visual_names"
+    
+            #Create Peer
+            #if (( ${#USERNAME} != 0 )) || (( ${#PASSWORD} != 0 )); then
+            if (( ${#PASSWORD} != 0 )); then
+                syncevolution --configure --template webdav username="$USERNAME" \
+                    password="$PASSWORD" syncURL="$url" \
+                    keyring=no "target-config@$contacts_server_config_names"
+            else
+                syncevolution --configure --template webdav syncURL="$url" \
+                    keyring=no "target-config@$contacts_server_config_names"
+            fi
+    
+            #Create New Source
+            syncevolution --configure backend=evolution-contacts \
+                database="$contacts_visual_names" @default "$contacts_names"
+    
+            #Add remote database
+            syncevolution --configure database="$url" \
+                backend=carddav "target-config@$contacts_server_config_names" \
+                "$contacts_names"
+    
+            #Connect remote contact list with local databases
+            syncevolution --configure --template SyncEvolution_Client \
+                Sync=None syncURL="local://@$contacts_server_config_names" \
+                "$contacts_server_config_names" "$contacts_names"
+    
+            #Add local database to the source
+            syncevolution --configure sync=two-way backend=evolution-contacts \
+                database="$contacts_visual_names" "$contacts_server_config_names" \
+                "$contacts_names"
+    
+            #Start first sync
+            syncevolution --sync refresh-from-remote \
+                "$contacts_server_config_names" "$contacts_names"
         fi
-
-        #Create New Source
-        syncevolution --configure backend=evolution-contacts \
-            database="$contacts_visual_names" @default "$contacts_names"
-
-        #Add remote database
-        syncevolution --configure database="$url" \
-            backend=carddav "target-config@$contacts_server_config_names" \
-            "$contacts_names"
-
-        #Connect remote contact list with local databases
-        syncevolution --configure --template SyncEvolution_Client \
-            Sync=None syncURL="local://@$contacts_server_config_names" \
-            "$contacts_server_config_names" "$contacts_names"
-
-        #Add local database to the source
-        syncevolution --configure sync=two-way backend=evolution-contacts \
-            database="$contacts_visual_names" "$contacts_server_config_names" \
-            "$contacts_names"
-
-        #Start first sync
-        syncevolution --sync refresh-from-remote \
-            "$contacts_server_config_names" "$contacts_names"
     done
 }
 
@@ -265,54 +281,59 @@ function calendar {
         # add cron entry and create manual sync script
         setup_sync "$calendar_server_config_names" "$calendar_names"
 
-        #Create Calendar
-        syncevolution --create-database backend=evolution-calendar \
-                                        database="$calendar_visual_names"
-
-        #Create Peer
-        #if (( ${#USERNAME} != 0 )) || (( ${#PASSWORD} != 0 )); then
-        if (( ${#PASSWORD} != 0 )); then
-            syncevolution --configure --template webdav username="$USERNAME" \
-                password="$PASSWORD" syncURL="$url" keyring=no \
-                "target-config@$calendar_server_config_names"
-        else
-            syncevolution --configure --template webdav syncURL="$url" \
-                keyring=no "target-config@$calendar_server_config_names"
+ 		if [[! $cron_only]  && [! $resync]]; then   #need for creating databases
+            #Create Calendar
+            syncevolution --create-database backend=evolution-calendar \
+                                            database="$calendar_visual_names"
+    
+            #Create Peer
+            #if (( ${#USERNAME} != 0 )) || (( ${#PASSWORD} != 0 )); then
+            if (( ${#PASSWORD} != 0 )); then
+                syncevolution --configure --template webdav username="$USERNAME" \
+                    password="$PASSWORD" syncURL="$url" keyring=no \
+                    "target-config@$calendar_server_config_names"
+            else
+                syncevolution --configure --template webdav syncURL="$url" \
+                    keyring=no "target-config@$calendar_server_config_names"
+            fi
+    
+            #Create New Source
+            syncevolution --configure backend=evolution-calendar \
+                database="$calendar_visual_names" @default "$calendar_names"
+    
+            #Add remote database
+            syncevolution --configure database="$url" backend=caldav \
+                "target-config@$calendar_server_config_names" "$calendar_names"
+    
+            #Connect remote calendars with local databases
+            syncevolution --configure --template SyncEvolution_Client \
+                syncURL="local://@$calendar_server_config_names" \
+                "$calendar_server_config_names" "$calendar_names"
+    
+            #Add local database to the source
+            syncevolution --configure sync=two-way backend=evolution-calendar \
+                database="$calendar_visual_names" "$calendar_server_config_names" \
+                "$calendar_names"
+    
+            #Start first sync
+            syncevolution --sync refresh-from-remote \
+                "$calendar_server_config_names" "$calendar_names"
         fi
-
-        #Create New Source
-        syncevolution --configure backend=evolution-calendar \
-            database="$calendar_visual_names" @default "$calendar_names"
-
-        #Add remote database
-        syncevolution --configure database="$url" backend=caldav \
-            "target-config@$calendar_server_config_names" "$calendar_names"
-
-        #Connect remote calendars with local databases
-        syncevolution --configure --template SyncEvolution_Client \
-            syncURL="local://@$calendar_server_config_names" \
-            "$calendar_server_config_names" "$calendar_names"
-
-        #Add local database to the source
-        syncevolution --configure sync=two-way backend=evolution-calendar \
-            database="$calendar_visual_names" "$calendar_server_config_names" \
-            "$calendar_names"
-
-        #Start first sync
-        syncevolution --sync refresh-from-remote \
-            "$calendar_server_config_names" "$calendar_names"
     done
 }
 
 function help {
     echo 'Usage:'
-    echo "   $0 --contacts --calendar config1.txt [config2.txt ...]"
-    echo "   $0 --contacts config1.txt [config2.txt ...]"
-    echo "   $0 --calendar config1.txt [config2.txt ...]"
+    echo "   $0 --contacts --calendar config1.txt [config2.txt ...] [--cron-only] [--resync]"
+    echo "   $0 --contacts config1.txt [config2.txt ...] [--cron-only] [--resync]"
+    echo "   $0 --calendar config1.txt [config2.txt ...] [--cron-only] [--resync]"
     echo "   $0 --delete-contacts --delete-calendar config1.txt [config2.txt ...]"
     echo "   $0 --delete-contacts config1.txt [config2.txt ...]"
     echo "   $0 --delete-calendar config1.txt [config2.txt ...]"
     echo "   $0 -h | --help"
+    echo " options :"
+    echo "         --cron-only : for recreating cron tasks, without recreating calendar or contacts"
+    echo "         --resync : resync the calendar and/or contacts in the config file"        
     exit 1
 }
 
@@ -322,7 +343,7 @@ if [ $# -eq 0 ]; then
 fi
 
 TEMP=$(getopt --options 'h' --long 'calendar,contacts,delete-calendar,\
-       delete-contacts,help' --name "$0" -- "$@")
+       delete-contacts,help,resync,cron-only' --name "$0" -- "$@")
 
 if [ $? -ne 0 ]; then
     echo 'Terminating...' >&2
@@ -336,6 +357,8 @@ contacts=false
 calendar=false
 delete_calendar=false
 delete_contacts=false
+cron_only=false # true : for resettig the cron task and manual_sync files
+resync=false # true: for resyncing the databases
 
 while true; do
     case "$1" in
@@ -359,6 +382,16 @@ while true; do
         ;;
         '--delete-calendar')
             delete_calendar=true
+            shift
+            continue
+        ;;
+        '--cron-only')
+            cron_only=true
+            shift
+            continue
+        ;;
+        '--resync')
+            resync=true
             shift
             continue
         ;;
