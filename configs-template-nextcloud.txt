@@ -18,6 +18,18 @@ CALENDAR_SERVER_CONFIG_NAMES[1]="${CAL_NAMES[1]}-nextcloud" # should be globally
 CALENDAR_NAMES[1]="${CAL_NAMES[1]}-calendar-$DOMAIN"        # should be globally unique, can NOT include the '@' symbol, can NOT be greater than 31 characters!
 CALENDAR_VISUAL_NAMES[1]="${CAL_NAMES[1]} - nextcloud"      # can NOT include the '@' symbol, can NOT be greater than 31 characters!
 
+
+## transform variables: lenght,  lowercase (except visual name)
+for (( i = 0; i < ${#CALENDAR_NAMES[@]}; i++ )); do
+    variable=${CALENDAR_SERVER_CONFIG_NAMES[$i]:0:30} #30 characters    
+    CALENDAR_SERVER_CONFIG_NAMES[$i]=${variable,,}  #lowercase
+
+    variable=${CALENDAR_NAMES[$i]:0:30} #30 characters
+    CALENDAR_NAMES[$i]=${variable,,}  #lowercase
+
+    variable=${CALENDAR_VISUAL_NAMES[$i]:0:30} #30 characters
+    CALENDAR_VISUAL_NAMES[$i]=${variable}  #
+done
 ###################################################################################################################################
 
 declare -g CARD_URL="https://$DOMAIN/remote.php/dav/addressbooks/users/$USERNAME/contacts" # Currently Nextcloud has a single contact group for each user so this is the full URL
@@ -28,6 +40,19 @@ CARD_NAMES[0]='' # Currently Nextcloud has a single contact group for each user 
 CONTACTS_SERVER_CONFIG_NAMES[0]="$USERNAME-contacts-nextcloud" # should be globally unique, can NOT include the '@' symbol, can NOT be greater than 31 characters!
 CONTACTS_NAMES[0]="$USERNAME-contacts-$DOMAIN"                 # should be globally unique, can NOT include the '@' symbol, can NOT be greater than 31 characters!
 CONTACTS_VISUAL_NAMES[0]="$USERNAME - nextcloud"                # can NOT include the '@' symbol, can NOT be greater than 31 characters!
+
+## transform variables: lenght,  lowercase (except visual name)
+for (( i = 0; i < ${#CONTACTS_NAMES[@]}; i++ )); do
+    variable=${CONTACTS_SERVER_CONFIG_NAMES[$i]:0:30} #30 characters    
+    CONTACTS_SERVER_CONFIG_NAMES[$i]=${variable,,}  #lowercase
+
+    variable=${CONTACTS_NAMES[$i]:0:30} #30 characters
+    CONTACTS_NAMES[$i]=${variable,,}  #lowercase
+
+    variable=${CONTACTS_VISUAL_NAMES[$i]:0:30} #30 characters
+    CONTACTS_VISUAL_NAMES[$i]=${variable}  #
+done
+
 
 ###################################################################################################################################
 
