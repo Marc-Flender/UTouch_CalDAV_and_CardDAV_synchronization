@@ -226,7 +226,7 @@ function contacts {
         setup_sync "$contacts_server_config_names"  \
                    "$contacts_names"
 
- 		if [[! $cron_only]  && [! $resync]]; then   #need for creating databases
+ 		if ((! $cron_only)  && (! $resync)); then   #need for creating databases
             #Create contact list
             syncevolution --create-database backend=evolution-contacts \
                                             database="$contacts_visual_names"
@@ -281,7 +281,7 @@ function calendar {
         # add cron entry and create manual sync script
         setup_sync "$calendar_server_config_names" "$calendar_names"
 
- 		if [[! $cron_only]  && [! $resync]]; then   #need for creating databases
+ 		if ((! $cron_only)  && (! $resync)); then   #need for creating databases
             #Create Calendar
             syncevolution --create-database backend=evolution-calendar \
                                             database="$calendar_visual_names"
